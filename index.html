@@ -1,0 +1,1265 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b5566">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<title>소하천 조사</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* 레이아웃: 고정 헤더 + 스크롤 본문 + 고정 액션바. 현장에서 한 손 조작 기준으로 터치 타깃 48px 이상. */
+:root{
+  color-scheme: light;
+  --bg:#e9eef0;
+  --surface:#ffffff;
+  --surface-2:#f4f7f8;
+  --fg:#0f2129;
+  --fg-dim:#5c7784;
+  --line:#ccd9de;
+  --accent:#0b5566;
+  --accent-soft:#d8ebf0;
+  --accent-fg:#ffffff;
+  --ok:#2d7d46;
+  --warn:#9a6611;
+  --bad:#b23a2d;
+  --shadow:0 2px 10px rgba(15,33,41,.12);
+  --r:12px;
+  --font:system-ui,-apple-system,"Segoe UI","Malgun Gothic","맑은 고딕",Roboto,"Noto Sans KR",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#0d171c;
+    --surface:#16252c;
+    --surface-2:#1d313a;
+    --fg:#e4eef1;
+    --fg-dim:#90a9b4;
+    --line:#2b444f;
+    --accent:#49b6ce;
+    --accent-soft:#1c3a45;
+    --accent-fg:#06222b;
+    --ok:#5fc47e;
+    --warn:#d9a441;
+    --bad:#e4705f;
+    --shadow:0 2px 10px rgba(0,0,0,.45);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0d171c;
+  --surface:#16252c;
+  --surface-2:#1d313a;
+  --fg:#e4eef1;
+  --fg-dim:#90a9b4;
+  --line:#2b444f;
+  --accent:#49b6ce;
+  --accent-soft:#1c3a45;
+  --accent-fg:#06222b;
+  --ok:#5fc47e;
+  --warn:#d9a441;
+  --bad:#e4705f;
+  --shadow:0 2px 10px rgba(0,0,0,.45);
+}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg);color:var(--fg);font-family:var(--font);
+  font-size:15px;line-height:1.5;
+  display:flex;flex-direction:column;
+  overscroll-behavior-y:none;
+  -webkit-text-size-adjust:100%;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+/* ── 헤더 ── */
+#topbar{
+  flex:0 0 auto;display:flex;align-items:center;gap:8px;
+  background:var(--accent);color:var(--accent-fg);
+  padding:10px 12px;padding-top:calc(10px + env(safe-area-inset-top,0px));
+  box-shadow:var(--shadow);z-index:40;
+}
+#topbar button{background:rgba(255,255,255,.14);border:0;color:inherit;
+  border-radius:10px;min-width:40px;height:40px;padding:0 10px;font-size:17px;line-height:1}
+#title{flex:1;min-width:0;font-weight:700;font-size:17px;letter-spacing:-.2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#gps{display:flex;align-items:center;gap:5px;font-size:12px;font-variant-numeric:tabular-nums;
+  background:rgba(255,255,255,.14);border-radius:999px;padding:6px 10px;white-space:nowrap}
+#gps .dot{width:9px;height:9px;border-radius:50%;background:var(--bad);flex:0 0 auto}
+#gps.ok .dot{background:var(--ok)} #gps.weak .dot{background:var(--warn)}
+
+/* ── 본문 ── */
+#main{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.pad{padding:14px;padding-bottom:20px}
+.muted{color:var(--fg-dim)}
+.small{font-size:13px}
+h2{font-size:14px;margin:0 0 8px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dim)}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.list{display:flex;flex-direction:column;gap:10px}
+
+.stream{display:flex;align-items:center;gap:12px;padding:14px;text-align:left;width:100%;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.stream .no{flex:0 0 auto;min-width:40px;height:40px;display:grid;place-items:center;
+  background:var(--accent-soft);color:var(--accent);border-radius:10px;font-weight:700;
+  font-variant-numeric:tabular-nums;font-size:14px;padding:0 6px}
+.stream .nm{flex:1;min-width:0}
+.stream .nm b{display:block;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stream .cnt{flex:0 0 auto;color:var(--fg-dim);font-size:13px;font-variant-numeric:tabular-nums}
+
+.empty{text-align:center;padding:40px 20px;color:var(--fg-dim)}
+.empty b{display:block;color:var(--fg);font-size:16px;margin-bottom:6px}
+
+/* 세그먼트 */
+.seg{display:flex;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;
+  padding:3px;gap:3px;margin-bottom:12px}
+.seg button{flex:1;background:transparent;border:0;border-radius:8px;padding:9px 4px;
+  font-size:14px;font-weight:600;color:var(--fg-dim)}
+.seg button[aria-selected="true"]{background:var(--surface);color:var(--fg);box-shadow:var(--shadow)}
+
+/* 사진 그리드 */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.shot{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  overflow:hidden;text-align:left;padding:0;box-shadow:var(--shadow);display:block;width:100%}
+.shot img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;max-width:100%;background:var(--surface-2)}
+.shot .meta{padding:8px 10px 10px}
+.shot .tags{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px}
+.shot .memo{font-size:12px;color:var(--fg-dim);display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden}
+.shot time{font-size:11px;color:var(--fg-dim);font-variant-numeric:tabular-nums}
+
+.tag{font-size:11px;font-weight:700;padding:2px 7px;border-radius:999px;
+  background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.tag.g-s{background:var(--accent-soft);color:var(--accent)}
+.tag.g-t{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.tag.g-e{background:color-mix(in srgb,var(--fg-dim) 18%,transparent);color:var(--fg-dim)}
+.tag.dir{background:transparent;border:1px solid var(--line);color:var(--fg-dim);font-weight:600}
+
+/* 지도 */
+#map{height:100%;width:100%;background:var(--surface-2)}
+#mapWrap{position:relative;height:100%}
+#mapTools{position:absolute;left:10px;bottom:10px;z-index:500;display:flex;gap:8px;flex-wrap:wrap;
+  max-width:calc(100% - 20px)}
+#mapTools button{background:var(--surface);color:var(--fg);border:1px solid var(--line);
+  border-radius:10px;padding:10px 12px;font-size:13px;font-weight:600;box-shadow:var(--shadow)}
+.leaflet-container{font-family:var(--font)}
+.pin{display:grid;place-items:center;width:26px;height:26px;border-radius:50% 50% 50% 4px;
+  transform:rotate(45deg);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);font-size:0}
+.pin i{transform:rotate(-45deg);font-style:normal;font-size:11px;font-weight:800;color:#fff}
+
+/* 액션바 */
+#actions{flex:0 0 auto;display:flex;gap:10px;padding:10px 12px;
+  padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));
+  background:var(--surface);border-top:1px solid var(--line)}
+.btn{flex:1;min-height:52px;border:0;border-radius:12px;font-size:16px;font-weight:700;
+  background:var(--surface-2);color:var(--fg);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;gap:8px}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:transparent}
+.btn.ghost{flex:0 0 auto;padding:0 16px}
+.btn:disabled{opacity:.45}
+
+/* 시트 / 모달 */
+.sheet{position:fixed;inset:0;z-index:60;background:rgba(10,20,25,.55);
+  display:flex;align-items:flex-end;justify-content:center}
+.sheet>.inner{background:var(--surface);width:100%;max-width:620px;max-height:92%;
+  border-radius:16px 16px 0 0;display:flex;flex-direction:column;overflow:hidden}
+.sheet header{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--line)}
+.sheet header b{flex:1;font-size:16px}
+.sheet header button{background:transparent;border:0;font-size:22px;line-height:1;padding:4px 8px;color:var(--fg-dim)}
+.sheet .body{flex:1;min-height:0;overflow-y:auto;padding:14px;
+  display:flex;flex-direction:column;gap:14px}
+.sheet .foot{padding:12px 14px;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));
+  border-top:1px solid var(--line);display:flex;gap:10px}
+
+.field{display:flex;flex-direction:column;gap:7px}
+.field>label{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-dim)}
+input[type=text],input[type=number],textarea,select{
+  width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;
+  padding:12px;min-height:48px}
+textarea{min-height:72px;resize:vertical}
+
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chips button{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;
+  padding:10px 14px;font-size:14px;font-weight:600;min-height:44px}
+.chips button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:transparent}
+.chipgroup{font-size:11px;font-weight:700;color:var(--fg-dim);align-self:center;
+  letter-spacing:.06em;margin-right:2px}
+
+.preview{width:100%;border-radius:10px;border:1px solid var(--line);max-width:100%;
+  aspect-ratio:4/3;object-fit:cover;background:var(--surface-2)}
+.gpsline{display:flex;align-items:center;gap:8px;font-size:13px;font-variant-numeric:tabular-nums;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.gpsline .dot{width:9px;height:9px;border-radius:50%;background:var(--bad);flex:0 0 auto}
+.gpsline.ok .dot{background:var(--ok)} .gpsline.weak .dot{background:var(--warn)}
+
+.fname{font-size:12.5px;word-break:break-all;background:var(--surface-2);border:1px dashed var(--line);
+  border-radius:10px;padding:10px 12px;color:var(--fg-dim)}
+.fname b{color:var(--fg);font-weight:700}
+
+/* 진행 표시 */
+.bar{height:6px;background:var(--surface-2);border-radius:999px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);width:0;transition:width .15s}
+
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));
+  background:var(--fg);color:var(--bg);padding:11px 16px;border-radius:999px;font-size:14px;
+  font-weight:600;z-index:90;box-shadow:var(--shadow);max-width:90%;text-align:center}
+
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header id="topbar">
+  <button id="btnBack" hidden aria-label="뒤로">←</button>
+  <div id="title">소하천 조사</div>
+  <div id="gps"><span class="dot"></span><span id="gpsTxt">GPS 대기</span></div>
+  <button id="btnSettings" aria-label="설정">⚙</button>
+</header>
+
+<main id="main">
+
+  <!-- 하천 목록 -->
+  <section id="viewStreams" class="pad">
+    <h2>조사 하천</h2>
+    <div id="streamList" class="list"></div>
+  </section>
+
+  <!-- 하천 상세 -->
+  <section id="viewStream" hidden style="height:100%;display:flex;flex-direction:column">
+    <div class="pad" style="padding-bottom:0">
+      <div class="seg" role="tablist">
+        <button id="tabList" role="tab" aria-selected="true">사진 목록</button>
+        <button id="tabMap" role="tab" aria-selected="false">지도</button>
+      </div>
+    </div>
+    <div id="paneList" class="pad" style="padding-top:0;flex:1;min-height:0;overflow-y:auto"></div>
+    <div id="paneMap" hidden style="flex:1;min-height:0">
+      <div id="mapWrap">
+        <div id="map"></div>
+        <div id="mapTools">
+          <button id="btnLocate">내 위치</button>
+          <button id="btnCacheTiles">이 영역 오프라인 저장</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 설정 -->
+  <section id="viewSettings" hidden class="pad">
+    <div class="list">
+      <div class="card pad">
+        <div class="field">
+          <label for="setSurveyor">조사자</label>
+          <input type="text" id="setSurveyor" placeholder="예: 김동성" autocomplete="name">
+          <p class="small muted" style="margin:0">기록과 CSV에 남습니다. 부서원끼리 자료를 합칠 때 구분용입니다.</p>
+        </div>
+      </div>
+      <div class="card pad">
+        <div class="field">
+          <label for="setBasemap">위성영상</label>
+          <select id="setBasemap">
+            <option value="esri">Esri 위성 (키 불필요)</option>
+            <option value="vworld">브이월드 항공사진 (키 필요)</option>
+          </select>
+        </div>
+        <div class="field" style="margin-top:12px">
+          <label for="setKey">브이월드 API 키</label>
+          <input type="text" id="setKey" placeholder="QGIS에서 쓰는 키 그대로" autocomplete="off" spellcheck="false">
+          <p class="small muted" style="margin:0">브이월드 사이트에서 이 키에 <b>이 앱의 주소(도메인)</b>를 등록해야 브라우저에서 보입니다. QGIS는 등록 없이도 되지만 브라우저는 다릅니다.</p>
+        </div>
+        <div class="field" style="margin-top:12px">
+          <label for="setHybrid">지명·경계 겹쳐보기</label>
+          <select id="setHybrid">
+            <option value="1">표시 (브이월드만 해당)</option>
+            <option value="0">끄기</option>
+          </select>
+        </div>
+      </div>
+      <div class="card pad">
+        <div class="field">
+          <label for="setMaxPx">저장 해상도</label>
+          <select id="setMaxPx">
+            <option value="1600">1600px (가벼움)</option>
+            <option value="1920">1920px (권장)</option>
+            <option value="2560">2560px (고화질·용량 큼)</option>
+          </select>
+          <p class="small muted" style="margin:0">보고서 양식에 넣는 용도라면 1920px으로 충분합니다.</p>
+        </div>
+      </div>
+      <div class="card pad">
+        <h2 style="margin-top:0">저장 공간</h2>
+        <p id="quota" class="small muted" style="margin:0 0 10px">확인 중…</p>
+        <button class="btn" id="btnExportAll" style="width:100%">전체 하천 내보내기</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="actions" hidden>
+  <button class="btn primary" id="btnShoot">📷 촬영</button>
+  <button class="btn ghost" id="btnExport">내보내기</button>
+</div>
+
+<input type="file" id="fileCam" accept="image/*" capture="environment" hidden>
+
+<!-- 기록 작성 시트 -->
+<div class="sheet" id="sheetRec" hidden>
+  <div class="inner">
+    <header><b id="recTitle">사진 기록</b><button id="recClose" aria-label="닫기">×</button></header>
+    <div class="body">
+      <img id="recPreview" class="preview" alt="촬영한 사진 미리보기">
+      <div class="gpsline" id="recGps"><span class="dot"></span><span id="recGpsTxt">위치 확인 중…</span></div>
+      <div class="field">
+        <label>유형</label>
+        <div class="chips" id="recType"></div>
+      </div>
+      <div class="field" id="recLabelField" hidden>
+        <label for="recLabel">구조물 명칭 (선택)</label>
+        <input type="text" id="recLabel" placeholder="예: 당동교">
+      </div>
+      <div class="field">
+        <label>촬영 방향</label>
+        <div class="chips" id="recDir"></div>
+      </div>
+      <div class="field">
+        <label for="recMemo">메모</label>
+        <textarea id="recMemo" placeholder="예: 우안 호안블록 탈락, 통수단면 협소"></textarea>
+      </div>
+      <div class="fname" id="recFname"></div>
+    </div>
+    <div class="foot">
+      <button class="btn" id="recCancel">취소</button>
+      <button class="btn primary" id="recSave">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 사진 상세 -->
+<div class="sheet" id="sheetDetail" hidden>
+  <div class="inner">
+    <header><b id="detTitle">사진</b><button id="detClose" aria-label="닫기">×</button></header>
+    <div class="body">
+      <img id="detImg" class="preview" style="aspect-ratio:auto" alt="사진 원본">
+      <div id="detMeta" class="list"></div>
+    </div>
+    <div class="foot">
+      <button class="btn" id="detDelete" style="color:var(--bad)">삭제</button>
+      <button class="btn primary" id="detEdit">내용 수정</button>
+    </div>
+  </div>
+</div>
+
+<!-- 하천 추가 -->
+<div class="sheet" id="sheetStream" hidden>
+  <div class="inner">
+    <header><b id="stTitle">하천 추가</b><button id="stClose" aria-label="닫기">×</button></header>
+    <div class="body">
+      <div class="field">
+        <label for="stName">소하천명</label>
+        <input type="text" id="stName" placeholder="예: 당동천">
+      </div>
+      <div class="field">
+        <label for="stNo">소하천번호 (선택)</label>
+        <input type="text" id="stNo" inputmode="numeric" placeholder="예: 37">
+      </div>
+      <div class="field">
+        <label for="stLen">기수립 연장 km (선택)</label>
+        <input type="text" id="stLen" inputmode="decimal" placeholder="예: 0.84">
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn" id="stDelete" hidden style="color:var(--bad)">삭제</button>
+      <button class="btn primary" id="stSave">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 확인 대화 -->
+<div class="sheet" id="sheetConfirm" hidden>
+  <div class="inner">
+    <header><b id="cfTitle">확인</b><button id="cfClose" aria-label="닫기">×</button></header>
+    <div class="body"><p id="cfMsg" style="margin:0"></p><div class="bar" id="cfBar" hidden><i></i></div></div>
+    <div class="foot">
+      <button class="btn" id="cfNo">취소</button>
+      <button class="btn primary" id="cfYes">확인</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+"use strict";
+
+/* ─────────────────────────── 상수 ─────────────────────────── */
+
+const TYPES = [
+  {g:'구간',   v:'시점',      cls:'g-s'},
+  {g:'구간',   v:'중류',      cls:'g-s'},
+  {g:'구간',   v:'종점',      cls:'g-s'},
+  {g:'구조물', v:'교량',      cls:'g-t', label:true},
+  {g:'구조물', v:'낙차공',    cls:'g-t', label:true},
+  {g:'구조물', v:'보',        cls:'g-t', label:true},
+  {g:'구조물', v:'수문',      cls:'g-t', label:true},
+  {g:'구조물', v:'기타구조물', cls:'g-t', label:true},
+  {g:'기타',   v:'기타',      cls:'g-e'}
+];
+const DIRS = ['하류방향','상류방향','좌안','우안','전경'];
+
+const PIN_COLOR = {'g-s':'#0b7a94','g-t':'#b07a16','g-e':'#6b7f88'};
+
+const BASEMAPS = {
+  esri:{
+    name:'Esri World Imagery',
+    url:()=>'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    maxNativeZoom:19, attr:'Esri, Maxar, Earthstar Geographics'
+  },
+  vworld:{
+    name:'브이월드 항공사진',
+    url:k=>`https://api.vworld.kr/req/wmts/1.0.0/${k}/Satellite/{z}/{y}/{x}.jpeg`,
+    hybrid:k=>`https://api.vworld.kr/req/wmts/1.0.0/${k}/Hybrid/{z}/{y}/{x}.png`,
+    maxNativeZoom:19, attr:'국토교통부 브이월드'
+  }
+};
+
+const DEFAULT_SETTINGS = {surveyor:'', basemap:'esri', vworldKey:'', hybrid:'1', maxPx:'1920'};
+
+/* ─────────────────────────── 상태 ─────────────────────────── */
+
+const state = {
+  db:null,
+  streams:[],
+  photos:[],          // 현재 하천의 사진
+  streamId:null,
+  settings:{...DEFAULT_SETTINGS},
+  pos:null,           // {lat,lon,acc,alt,ts}
+  heading:null,
+  pending:null,       // 작성 중인 기록
+  editing:null,       // 수정 중인 사진 id
+  map:null, layerBase:null, layerHybrid:null, markers:null, meMarker:null,
+  urls:new Set()
+};
+
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+/* ─────────────────────────── IndexedDB ─────────────────────────── */
+
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r = indexedDB.open('sohacheon-survey',1);
+    r.onupgradeneeded = ()=>{
+      const db = r.result;
+      if(!db.objectStoreNames.contains('streams')) db.createObjectStore('streams',{keyPath:'id'});
+      if(!db.objectStoreNames.contains('photos')){
+        const s = db.createObjectStore('photos',{keyPath:'id'});
+        s.createIndex('streamId','streamId');
+      }
+    };
+    r.onsuccess = ()=>res(r.result);
+    r.onerror = ()=>rej(r.error);
+  });
+}
+function tx(store,mode){ return state.db.transaction(store,mode).objectStore(store); }
+function req(r){ return new Promise((res,rej)=>{ r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+const dbAll   = s => req(tx(s,'readonly').getAll());
+const dbPut   = (s,v) => req(tx(s,'readwrite').put(v));
+const dbDel   = (s,k) => req(tx(s,'readwrite').delete(k));
+const dbByStream = id => req(tx('photos','readonly').index('streamId').getAll(id));
+
+/* ─────────────────────────── 설정 (localStorage) ─────────────────────────── */
+
+function loadSettings(){
+  try{
+    const raw = localStorage.getItem('sohacheon-settings');
+    if(raw) state.settings = {...DEFAULT_SETTINGS, ...JSON.parse(raw)};
+  }catch(e){ /* 사생활 보호 모드 등: 기본값 사용 */ }
+}
+function saveSettings(){
+  try{ localStorage.setItem('sohacheon-settings', JSON.stringify(state.settings)); }catch(e){}
+}
+
+/* ─────────────────────────── 유틸 ─────────────────────────── */
+
+const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+
+function pad(n,w=2){ return String(n).padStart(w,'0'); }
+function stamp(ts){
+  const d = new Date(ts);
+  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+function timeText(ts){
+  const d = new Date(ts);
+  return `${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function isoText(ts){
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function sanitize(s){
+  return String(s||'').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'').replace(/\s+/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'');
+}
+function typeOf(v){ return TYPES.find(t=>t.v===v) || TYPES[0]; }
+
+function buildName(streamName, rec){
+  const parts = [streamName, rec.type];
+  if(rec.label) parts.push(rec.label);
+  if(rec.dir) parts.push(rec.dir);
+  parts.push(stamp(rec.ts));
+  return sanitize(parts.join('_')) + '.jpg';
+}
+
+function objURL(blob){ const u = URL.createObjectURL(blob); state.urls.add(u); return u; }
+function freeURLs(){ state.urls.forEach(u=>URL.revokeObjectURL(u)); state.urls.clear(); }
+
+let toastTimer;
+function toast(msg, ms=2200){
+  let el = $('#toast');
+  if(!el){ el = document.createElement('div'); el.id='toast'; document.body.appendChild(el); }
+  el.textContent = msg; el.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>{ el.hidden = true; }, ms);
+}
+
+/* 인앱 확인창 (confirm()은 이 환경에서 쓰지 않음) */
+function confirmAsk(title,msg,yes='확인'){
+  return new Promise(res=>{
+    $('#cfTitle').textContent = title;
+    $('#cfMsg').textContent = msg;
+    $('#cfYes').textContent = yes;
+    $('#cfBar').hidden = true;
+    $('#sheetConfirm').hidden = false;
+    const done = v => { $('#sheetConfirm').hidden = true; cleanup(); res(v); };
+    const onYes = ()=>done(true), onNo = ()=>done(false);
+    function cleanup(){
+      $('#cfYes').removeEventListener('click',onYes);
+      $('#cfNo').removeEventListener('click',onNo);
+      $('#cfClose').removeEventListener('click',onNo);
+    }
+    $('#cfYes').addEventListener('click',onYes);
+    $('#cfNo').addEventListener('click',onNo);
+    $('#cfClose').addEventListener('click',onNo);
+  });
+}
+function progressOpen(title,msg){
+  $('#cfTitle').textContent = title;
+  $('#cfMsg').textContent = msg;
+  $('#cfBar').hidden = false;
+  $('#cfBar').firstElementChild.style.width = '0%';
+  $('#cfYes').hidden = true; $('#cfNo').hidden = true;
+  $('#sheetConfirm').hidden = false;
+}
+function progressSet(frac,msg){
+  $('#cfBar').firstElementChild.style.width = Math.round(frac*100)+'%';
+  if(msg) $('#cfMsg').textContent = msg;
+}
+function progressClose(){
+  $('#sheetConfirm').hidden = true;
+  $('#cfYes').hidden = false; $('#cfNo').hidden = false;
+}
+
+/* ─────────────────────────── GPS / 나침반 ─────────────────────────── */
+
+function gpsClass(acc){ return acc==null ? '' : acc<=10 ? 'ok' : acc<=30 ? 'weak' : ''; }
+
+function renderGps(){
+  const el = $('#gps'), txt = $('#gpsTxt');
+  if(!state.pos){ el.className=''; txt.textContent='GPS 대기'; }
+  else{
+    el.className = gpsClass(state.pos.acc);
+    txt.textContent = `±${Math.round(state.pos.acc)}m`;
+  }
+  const line = $('#recGps');
+  if(line && !$('#sheetRec').hidden){
+    const p = state.pending && state.pending.pos;
+    if(!p){ line.className='gpsline'; $('#recGpsTxt').textContent='위치를 못 잡았습니다 — 지도에서 직접 찍어주세요'; }
+    else{
+      line.className = 'gpsline '+gpsClass(p.acc);
+      $('#recGpsTxt').textContent =
+        `${p.lat.toFixed(6)}, ${p.lon.toFixed(6)} · 오차 ±${Math.round(p.acc)}m`
+        + (p.alt!=null ? ` · 고도 ${Math.round(p.alt)}m` : '');
+    }
+  }
+}
+
+function startGps(){
+  if(!navigator.geolocation){ toast('이 기기에서 GPS를 쓸 수 없습니다'); return; }
+  navigator.geolocation.watchPosition(
+    p=>{
+      state.pos = {lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy,
+                   alt:p.coords.altitude, ts:p.timestamp};
+      renderGps(); updateMe();
+    },
+    err=>{
+      if(err.code === 1) $('#gpsTxt').textContent='위치 거부됨';
+      else $('#gpsTxt').textContent='GPS 신호 없음';
+    },
+    {enableHighAccuracy:true, maximumAge:3000, timeout:20000}
+  );
+}
+
+function startCompass(){
+  const onAbs = e=>{
+    if(e.alpha==null) return;
+    state.heading = Math.round((360 - e.alpha) % 360);
+  };
+  if('ondeviceorientationabsolute' in window)
+    window.addEventListener('deviceorientationabsolute', onAbs, true);
+  else
+    window.addEventListener('deviceorientation', e=>{
+      if(e.webkitCompassHeading!=null) state.heading = Math.round(e.webkitCompassHeading);
+      else if(e.absolute) onAbs(e);
+    }, true);
+}
+
+/* ─────────────────────────── 사진 처리 ─────────────────────────── */
+
+async function toBitmap(file){
+  try{ return await createImageBitmap(file,{imageOrientation:'from-image'}); }
+  catch(e){ return await createImageBitmap(file); }
+}
+function drawTo(bmp,max,quality){
+  const scale = Math.min(1, max/Math.max(bmp.width,bmp.height));
+  const w = Math.max(1,Math.round(bmp.width*scale)), h = Math.max(1,Math.round(bmp.height*scale));
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bmp,0,0,w,h);
+  return new Promise(r=>c.toBlob(r,'image/jpeg',quality));
+}
+async function processPhoto(file){
+  const bmp = await toBitmap(file);
+  const max = parseInt(state.settings.maxPx,10) || 1920;
+  const full = await drawTo(bmp, max, 0.85);
+  const thumb = await drawTo(bmp, 420, 0.7);
+  if(bmp.close) bmp.close();
+  return {full, thumb};
+}
+
+/* ─────────────────────────── 화면 전환 ─────────────────────────── */
+
+let view = 'streams';
+function go(v){
+  view = v;
+  $('#viewStreams').hidden = v!=='streams';
+  $('#viewStream').hidden  = v!=='stream';
+  $('#viewSettings').hidden= v!=='settings';
+  $('#actions').hidden     = v!=='stream';
+  $('#btnBack').hidden     = v==='streams';
+  $('#main').style.overflowY = v==='stream' ? 'hidden' : 'auto';
+  if(v==='streams'){ $('#title').textContent='소하천 조사'; renderStreams(); }
+  if(v==='settings'){ $('#title').textContent='설정'; renderSettings(); }
+}
+
+/* ─────────────────────────── 하천 목록 ─────────────────────────── */
+
+async function renderStreams(){
+  state.streams = (await dbAll('streams')).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+  const all = await dbAll('photos');
+  const counts = {};
+  all.forEach(p=>{ counts[p.streamId] = (counts[p.streamId]||0)+1; });
+
+  const box = $('#streamList');
+  box.innerHTML = '';
+
+  if(!state.streams.length){
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.innerHTML = '<b>조사할 하천을 추가하세요</b>하천을 만들면 그 안에서 찍은 사진이<br>하천명으로 자동 정리됩니다.';
+    box.appendChild(d);
+  }
+
+  state.streams.forEach(s=>{
+    const b = document.createElement('button');
+    b.className = 'stream';
+    b.innerHTML =
+      `<span class="no">${s.no ? escapeHtml(s.no) : '—'}</span>
+       <span class="nm"><b>${escapeHtml(s.name)}</b>
+         <span class="small muted">${s.len ? escapeHtml(s.len)+' km' : '연장 미입력'}</span></span>
+       <span class="cnt">사진 ${counts[s.id]||0}</span>`;
+    b.addEventListener('click',()=>openStream(s.id));
+    b.addEventListener('contextmenu',e=>{ e.preventDefault(); openStreamSheet(s); });
+    box.appendChild(b);
+  });
+
+  const add = document.createElement('button');
+  add.className = 'btn primary';
+  add.style.marginTop = '14px'; add.style.width = '100%';
+  add.textContent = '+ 하천 추가';
+  add.addEventListener('click',()=>openStreamSheet(null));
+  box.appendChild(add);
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* 하천 추가·수정 시트 */
+let streamEditing = null;
+function openStreamSheet(s){
+  streamEditing = s;
+  $('#stTitle').textContent = s ? '하천 수정' : '하천 추가';
+  $('#stName').value = s ? s.name : '';
+  $('#stNo').value   = s ? (s.no||'') : '';
+  $('#stLen').value  = s ? (s.len||'') : '';
+  $('#stDelete').hidden = !s;
+  $('#sheetStream').hidden = false;
+  setTimeout(()=>$('#stName').focus(),50);
+}
+$('#stClose').addEventListener('click',()=>{ $('#sheetStream').hidden = true; });
+$('#stSave').addEventListener('click', async ()=>{
+  const name = $('#stName').value.trim();
+  if(!name){ toast('소하천명을 입력하세요'); return; }
+  const renamed = streamEditing && streamEditing.name !== name;
+  const rec = streamEditing
+    ? {...streamEditing, name, no:$('#stNo').value.trim(), len:$('#stLen').value.trim(), updatedAt:Date.now()}
+    : {id:uid(), name, no:$('#stNo').value.trim(), len:$('#stLen').value.trim(),
+       createdAt:Date.now(), updatedAt:Date.now()};
+  await dbPut('streams',rec);
+
+  // 하천명이 바뀌면 이미 찍은 사진의 파일명도 새 이름으로 맞춘다
+  if(renamed){
+    const photos = await dbByStream(rec.id);
+    for(const p of photos) await dbPut('photos', {...p, filename: buildName(name, p)});
+    if(photos.length) toast(`사진 ${photos.length}장의 파일명도 바꿨습니다`, 3000);
+  }
+
+  $('#sheetStream').hidden = true;
+  if(view==='stream' && state.streamId===rec.id){ $('#title').textContent = rec.name; await loadPhotos(); }
+  else renderStreams();
+  toast(streamEditing ? '수정했습니다' : `${name} 추가`);
+});
+$('#stDelete').addEventListener('click', async ()=>{
+  if(!streamEditing) return;
+  const photos = await dbByStream(streamEditing.id);
+  const ok = await confirmAsk('하천 삭제',
+    `${streamEditing.name}과 사진 ${photos.length}장을 모두 지웁니다. 되돌릴 수 없습니다.`, '삭제');
+  if(!ok) return;
+  for(const p of photos) await dbDel('photos',p.id);
+  await dbDel('streams',streamEditing.id);
+  $('#sheetStream').hidden = true;
+  go('streams');
+  toast('삭제했습니다');
+});
+
+/* ─────────────────────────── 하천 상세 ─────────────────────────── */
+
+function currentStream(){ return state.streams.find(s=>s.id===state.streamId); }
+
+async function openStream(id){
+  state.streamId = id;
+  state.streams = await dbAll('streams');
+  const s = currentStream();
+  $('#title').textContent = s ? s.name : '하천';
+  go('stream');
+  showPane('list');
+  await loadPhotos();
+}
+
+async function loadPhotos(){
+  freeURLs();
+  state.photos = (await dbByStream(state.streamId)).sort((a,b)=>a.ts-b.ts);
+  renderPhotos();
+  if(state.map) renderMarkers();
+  $('#btnExport').disabled = state.photos.length===0;
+}
+
+function renderPhotos(){
+  const box = $('#paneList');
+  box.innerHTML = '';
+  if(!state.photos.length){
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.innerHTML = '<b>아직 사진이 없습니다</b>아래 촬영 버튼을 누르면 위치가 함께 기록됩니다.';
+    box.appendChild(d);
+    return;
+  }
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  state.photos.forEach(p=>{
+    const t = typeOf(p.type);
+    const b = document.createElement('button');
+    b.className = 'shot';
+    const img = document.createElement('img');
+    img.src = objURL(p.thumb); img.alt = p.filename; img.loading = 'lazy';
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML =
+      `<div class="tags">
+         <span class="tag ${t.cls}">${escapeHtml(p.type)}${p.label?' · '+escapeHtml(p.label):''}</span>
+         ${p.dir?`<span class="tag dir">${escapeHtml(p.dir)}</span>`:''}
+       </div>
+       ${p.memo?`<div class="memo">${escapeHtml(p.memo)}</div>`:''}
+       <time>${timeText(p.ts)}${p.pos?'':' · 위치없음'}</time>`;
+    b.append(img,meta);
+    b.addEventListener('click',()=>openDetail(p.id));
+    grid.appendChild(b);
+  });
+  box.appendChild(grid);
+}
+
+function showPane(which){
+  const isMap = which==='map';
+  $('#tabList').setAttribute('aria-selected', String(!isMap));
+  $('#tabMap').setAttribute('aria-selected', String(isMap));
+  $('#paneList').hidden = isMap;
+  $('#paneMap').hidden = !isMap;
+  if(isMap){ ensureMap(); setTimeout(()=>{ state.map.invalidateSize(); fitMarkers(); },60); }
+}
+$('#tabList').addEventListener('click',()=>showPane('list'));
+$('#tabMap').addEventListener('click',()=>showPane('map'));
+
+/* ─────────────────────────── 지도 ─────────────────────────── */
+
+function tileOptions(bm){
+  return {maxNativeZoom:bm.maxNativeZoom, maxZoom:21, attribution:bm.attr, crossOrigin:false};
+}
+function ensureMap(){
+  if(state.map){ applyBasemap(); return; }
+  const start = state.pos ? [state.pos.lat,state.pos.lon] : [36.5,127.8];
+  state.map = L.map('map',{zoomControl:true, attributionControl:true})
+               .setView(start, state.pos?16:7);
+  state.markers = L.layerGroup().addTo(state.map);
+  applyBasemap();
+  renderMarkers();
+}
+function applyBasemap(){
+  if(!state.map) return;
+  if(state.layerBase){ state.map.removeLayer(state.layerBase); state.layerBase=null; }
+  if(state.layerHybrid){ state.map.removeLayer(state.layerHybrid); state.layerHybrid=null; }
+
+  const key = state.settings.vworldKey.trim();
+  const useVworld = state.settings.basemap==='vworld' && key;
+  if(state.settings.basemap==='vworld' && !key) toast('브이월드 키가 없어 Esri 영상으로 표시합니다');
+
+  const bm = useVworld ? BASEMAPS.vworld : BASEMAPS.esri;
+  state.layerBase = L.tileLayer(bm.url(key), tileOptions(bm)).addTo(state.map);
+
+  if(useVworld && state.settings.hybrid==='1'){
+    state.layerHybrid = L.tileLayer(BASEMAPS.vworld.hybrid(key), tileOptions(bm)).addTo(state.map);
+  }
+  if(useVworld){
+    let failed = 0;
+    state.layerBase.on('tileerror',()=>{
+      if(++failed===6) toast('브이월드 타일이 안 옵니다 — 키의 도메인 등록을 확인하세요', 4000);
+    });
+  }
+}
+function pinIcon(cls){
+  return L.divIcon({
+    className:'', iconSize:[26,26], iconAnchor:[13,26], popupAnchor:[0,-24],
+    html:`<div class="pin" style="background:${PIN_COLOR[cls]||PIN_COLOR['g-e']}"><i></i></div>`
+  });
+}
+function renderMarkers(){
+  if(!state.markers) return;
+  state.markers.clearLayers();
+  state.photos.forEach(p=>{
+    if(!p.pos) return;
+    const t = typeOf(p.type);
+    const m = L.marker([p.pos.lat,p.pos.lon],{icon:pinIcon(t.cls)});
+    const html = document.createElement('div');
+    html.style.minWidth = '160px';
+    const img = document.createElement('img');
+    img.src = objURL(p.thumb); img.style.width='100%'; img.style.borderRadius='6px'; img.alt='';
+    const cap = document.createElement('div');
+    cap.style.cssText = 'font-size:12px;margin-top:6px;word-break:break-all';
+    cap.innerHTML = `<b>${escapeHtml(p.type)}${p.dir?' · '+escapeHtml(p.dir):''}</b><br>${escapeHtml(p.filename)}`;
+    html.append(img,cap);
+    m.bindPopup(html);
+    m.on('popupopen',()=>{ /* 썸네일 URL은 loadPhotos에서 일괄 해제 */ });
+    state.markers.addLayer(m);
+  });
+}
+function fitMarkers(){
+  const pts = state.photos.filter(p=>p.pos).map(p=>[p.pos.lat,p.pos.lon]);
+  if(pts.length) state.map.fitBounds(L.latLngBounds(pts).pad(0.25),{maxZoom:18});
+  else if(state.pos) state.map.setView([state.pos.lat,state.pos.lon],16);
+}
+function updateMe(){
+  if(!state.map || !state.pos) return;
+  const ll = [state.pos.lat,state.pos.lon];
+  if(!state.meMarker){
+    state.meMarker = L.circleMarker(ll,{radius:7,color:'#fff',weight:2,
+      fillColor:'#2f7df6',fillOpacity:1}).addTo(state.map);
+  } else state.meMarker.setLatLng(ll);
+}
+$('#btnLocate').addEventListener('click',()=>{
+  if(!state.pos){ toast('아직 위치를 못 잡았습니다'); return; }
+  state.map.setView([state.pos.lat,state.pos.lon],17);
+});
+
+/* 현재 화면 타일 미리받기 */
+function tilesForView(){
+  const m = state.map, b = m.getBounds();
+  const z0 = Math.max(10, Math.round(m.getZoom()));
+  const bm = (state.settings.basemap==='vworld' && state.settings.vworldKey.trim())
+             ? BASEMAPS.vworld : BASEMAPS.esri;
+  const key = state.settings.vworldKey.trim();
+  const tmpl = [bm.url(key)];
+  if(bm===BASEMAPS.vworld && state.settings.hybrid==='1') tmpl.push(bm.hybrid(key));
+
+  const urls = [];
+  for(let z=z0; z<=Math.min(z0+3, bm.maxNativeZoom); z++){
+    const nw = m.project(b.getNorthWest(), z).divideBy(256).floor();
+    const se = m.project(b.getSouthEast(), z).divideBy(256).floor();
+    for(let x=nw.x; x<=se.x; x++) for(let y=nw.y; y<=se.y; y++)
+      tmpl.forEach(t=>urls.push(t.replace('{z}',z).replace('{x}',x).replace('{y}',y)));
+  }
+  return urls;
+}
+$('#btnCacheTiles').addEventListener('click', async ()=>{
+  if(!('serviceWorker' in navigator) || !navigator.serviceWorker.controller){
+    toast('오프라인 저장은 앱을 https 주소로 열었을 때만 됩니다', 3500); return;
+  }
+  const urls = tilesForView();
+  if(urls.length > 2500){
+    toast('범위가 너무 넓습니다 — 지도를 더 확대하세요', 3000); return;
+  }
+  const ok = await confirmAsk('오프라인 저장',
+    `현재 화면과 그 아래 3단계 확대까지 타일 ${urls.length}장을 받습니다. 통신 되는 곳에서 미리 받아두세요.`, '받기');
+  if(!ok) return;
+
+  progressOpen('오프라인 저장', '받는 중…');
+  let done = 0, fail = 0, i = 0;
+  const worker = async ()=>{
+    while(i < urls.length){
+      const u = urls[i++];
+      try{ await fetch(u,{mode:'no-cors',cache:'default'}); }catch(e){ fail++; }
+      done++;
+      if(done % 5 === 0 || done===urls.length)
+        progressSet(done/urls.length, `${done} / ${urls.length}장`);
+    }
+  };
+  await Promise.all(Array.from({length:6}, worker));
+  progressClose();
+  toast(fail ? `${urls.length-fail}장 저장 (${fail}장 실패)` : `${urls.length}장 저장 완료`);
+});
+
+/* ─────────────────────────── 촬영 · 기록 ─────────────────────────── */
+
+$('#btnShoot').addEventListener('click',()=>{ $('#fileCam').value=''; $('#fileCam').click(); });
+
+$('#fileCam').addEventListener('change', async e=>{
+  const file = e.target.files && e.target.files[0];
+  if(!file) return;
+  toast('사진 처리 중…', 1200);
+  let imgs;
+  try{ imgs = await processPhoto(file); }
+  catch(err){ toast('사진을 읽지 못했습니다'); return; }
+
+  state.editing = null;
+  state.pending = {
+    id: uid(),
+    ts: Date.now(),
+    type: '중류',
+    label: '',
+    dir: '하류방향',
+    memo: '',
+    pos: state.pos ? {...state.pos} : null,
+    heading: state.heading,
+    full: imgs.full,
+    thumb: imgs.thumb
+  };
+  openRec();
+});
+
+function openRec(){
+  const p = state.pending;
+  $('#recTitle').textContent = state.editing ? '기록 수정' : '사진 기록';
+  $('#recPreview').src = objURL(p.thumb);
+  $('#recLabel').value = p.label || '';
+  $('#recMemo').value = p.memo || '';
+  buildChips('#recType', TYPES.map(t=>t.v), p.type, v=>{ p.type=v; afterChip(); }, true);
+  buildChips('#recDir', DIRS, p.dir, v=>{ p.dir = (p.dir===v ? '' : v); afterChip(); });
+  afterChip();
+  $('#sheetRec').hidden = false;
+  renderGps();
+}
+function afterChip(){
+  const p = state.pending;
+  const t = typeOf(p.type);
+  $('#recLabelField').hidden = !t.label;
+  if(!t.label){ p.label = ''; $('#recLabel').value = ''; }
+  buildChips('#recType', TYPES.map(x=>x.v), p.type, v=>{ p.type=v; afterChip(); }, true);
+  buildChips('#recDir', DIRS, p.dir, v=>{ p.dir = (p.dir===v ? '' : v); afterChip(); });
+  updateFname();
+}
+function buildChips(sel, values, active, onPick, grouped){
+  const box = $(sel);
+  box.innerHTML = '';
+  let lastG = null;
+  values.forEach(v=>{
+    if(grouped){
+      const g = typeOf(v).g;
+      if(g!==lastG){
+        const lab = document.createElement('span');
+        lab.className = 'chipgroup'; lab.textContent = g;
+        box.appendChild(lab); lastG = g;
+      }
+    }
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = v;
+    b.setAttribute('aria-pressed', String(v===active));
+    b.addEventListener('click',()=>onPick(v));
+    box.appendChild(b);
+  });
+}
+function updateFname(){
+  const s = currentStream();
+  const p = state.pending;
+  p.label = $('#recLabel').value.trim();
+  $('#recFname').innerHTML = '저장될 이름 &nbsp;<b>'+escapeHtml(buildName(s?s.name:'하천', p))+'</b>';
+}
+$('#recLabel').addEventListener('input', ()=>{ if(state.pending) updateFname(); });
+$('#recMemo').addEventListener('input', ()=>{ if(state.pending) state.pending.memo = $('#recMemo').value; });
+
+function closeRec(){ $('#sheetRec').hidden = true; state.pending = null; state.editing = null; }
+$('#recClose').addEventListener('click', closeRec);
+$('#recCancel').addEventListener('click', closeRec);
+
+$('#recSave').addEventListener('click', async ()=>{
+  const s = currentStream();
+  const p = state.pending;
+  p.label = $('#recLabel').value.trim();
+  p.memo = $('#recMemo').value.trim();
+  const rec = {
+    id: p.id, streamId: state.streamId, ts: p.ts,
+    type: p.type, label: p.label, dir: p.dir, memo: p.memo,
+    pos: p.pos, heading: p.heading,
+    surveyor: state.settings.surveyor,
+    full: p.full, thumb: p.thumb,
+    filename: buildName(s?s.name:'하천', p)
+  };
+  try{
+    await dbPut('photos', rec);
+    await dbPut('streams', {...s, updatedAt:Date.now()});
+  }catch(err){
+    toast('저장 실패 — 저장 공간을 확인하세요', 4000); return;
+  }
+  closeRec();
+  await loadPhotos();
+  toast('저장: ' + rec.filename, 2600);
+});
+
+/* ─────────────────────────── 사진 상세 ─────────────────────────── */
+
+let detailId = null;
+function openDetail(id){
+  const p = state.photos.find(x=>x.id===id);
+  if(!p) return;
+  detailId = id;
+  $('#detTitle').textContent = p.type + (p.dir ? ' · '+p.dir : '');
+  $('#detImg').src = objURL(p.full);
+  const rows = [
+    ['파일명', p.filename],
+    ['유형', p.type + (p.label ? ' / '+p.label : '')],
+    ['방향', p.dir || '—'],
+    ['좌표', p.pos ? `${p.pos.lat.toFixed(6)}, ${p.pos.lon.toFixed(6)}` : '기록 없음'],
+    ['오차', p.pos ? `±${Math.round(p.pos.acc)} m` : '—'],
+    ['고도', p.pos && p.pos.alt!=null ? `${Math.round(p.pos.alt)} m` : '—'],
+    ['방위', p.heading!=null ? `${p.heading}° (참고)` : '—'],
+    ['촬영', isoText(p.ts)],
+    ['조사자', p.surveyor || '—'],
+    ['메모', p.memo || '—']
+  ];
+  $('#detMeta').innerHTML = rows.map(([k,v])=>
+    `<div style="display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)">
+       <span class="small muted" style="flex:0 0 68px">${k}</span>
+       <span class="small" style="flex:1;min-width:0;word-break:break-all">${escapeHtml(v)}</span>
+     </div>`).join('');
+  $('#sheetDetail').hidden = false;
+}
+$('#detClose').addEventListener('click',()=>{ $('#sheetDetail').hidden = true; });
+$('#detEdit').addEventListener('click',()=>{
+  const p = state.photos.find(x=>x.id===detailId);
+  if(!p) return;
+  $('#sheetDetail').hidden = true;
+  state.editing = p.id;
+  state.pending = {...p};
+  openRec();
+});
+$('#detDelete').addEventListener('click', async ()=>{
+  const p = state.photos.find(x=>x.id===detailId);
+  if(!p) return;
+  const ok = await confirmAsk('사진 삭제', p.filename + ' 을 지웁니다.', '삭제');
+  if(!ok) return;
+  await dbDel('photos', p.id);
+  $('#sheetDetail').hidden = true;
+  await loadPhotos();
+  toast('삭제했습니다');
+});
+
+/* ─────────────────────────── 내보내기 ─────────────────────────── */
+
+const CSV_HEAD = ['파일명','소하천번호','소하천명','유형','명칭','촬영방향','위도','경도',
+                  'GPS오차(m)','고도(m)','방위각(deg)','촬영시각','조사자','메모'];
+
+function csvCell(v){
+  const s = v==null ? '' : String(v);
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function buildCsv(stream, photos){
+  const rows = [CSV_HEAD.join(',')];
+  photos.forEach(p=>{
+    rows.push([
+      p.filename, stream.no||'', stream.name, p.type, p.label||'', p.dir||'',
+      p.pos?p.pos.lat.toFixed(7):'', p.pos?p.pos.lon.toFixed(7):'',
+      p.pos?Math.round(p.pos.acc):'', (p.pos&&p.pos.alt!=null)?Math.round(p.pos.alt):'',
+      p.heading!=null?p.heading:'', isoText(p.ts), p.surveyor||'', p.memo||''
+    ].map(csvCell).join(','));
+  });
+  return '﻿' + rows.join('\r\n');   // BOM: 엑셀에서 한글 안 깨지게
+}
+function buildGeoJson(stream, photos){
+  return JSON.stringify({
+    type:'FeatureCollection',
+    name: stream.name,
+    crs:{type:'name',properties:{name:'urn:ogc:def:crs:OGC:1.3:CRS84'}},
+    features: photos.filter(p=>p.pos).map(p=>({
+      type:'Feature',
+      geometry:{type:'Point',coordinates:[+p.pos.lon.toFixed(7), +p.pos.lat.toFixed(7)]},
+      properties:{
+        파일명:p.filename, 소하천번호:stream.no||'', 소하천명:stream.name,
+        유형:p.type, 명칭:p.label||'', 촬영방향:p.dir||'',
+        'GPS오차_m':p.pos?Math.round(p.pos.acc):null,
+        '고도_m':p.pos&&p.pos.alt!=null?Math.round(p.pos.alt):null,
+        방위각:p.heading, 촬영시각:isoText(p.ts), 조사자:p.surveyor||'', 메모:p.memo||''
+      }
+    }))
+  }, null, 1);
+}
+
+async function exportStreams(streams){
+  const zip = new JSZip();
+  let total = 0;
+  for(const s of streams){
+    const photos = (await dbByStream(s.id)).sort((a,b)=>a.ts-b.ts);
+    if(!photos.length) continue;
+    const folder = zip.folder(sanitize(s.name));
+    const used = new Set();
+    photos.forEach(p=>{
+      let name = p.filename, n = 2;
+      while(used.has(name)){ name = p.filename.replace(/\.jpg$/,'') + `-${n++}.jpg`; }
+      used.add(name);
+      folder.file(name, p.full);
+      total++;
+    });
+    folder.file(sanitize(s.name)+'_기록.csv', buildCsv(s, photos));
+    folder.file(sanitize(s.name)+'.geojson', buildGeoJson(s, photos));
+  }
+  if(!total){ toast('내보낼 사진이 없습니다'); return; }
+
+  progressOpen('내보내기', 'ZIP 만드는 중…');
+  const blob = await zip.generateAsync(
+    {type:'blob', compression:'STORE'},     // JPEG는 이미 압축됨 — 묶기만
+    meta => progressSet(meta.percent/100, `${Math.round(meta.percent)}%`)
+  );
+  progressClose();
+
+  const label = streams.length===1 ? sanitize(streams[0].name) : '소하천조사';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${label}_${stamp(Date.now())}.zip`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
+  toast(`${total}장 내보냈습니다 — 다운로드 폴더 확인`, 3500);
+}
+
+$('#btnExport').addEventListener('click',()=>{
+  const s = currentStream();
+  if(s) exportStreams([s]);
+});
+$('#btnExportAll').addEventListener('click', async ()=>{
+  const all = await dbAll('streams');
+  exportStreams(all);
+});
+
+/* ─────────────────────────── 설정 화면 ─────────────────────────── */
+
+function renderSettings(){
+  $('#setSurveyor').value = state.settings.surveyor;
+  $('#setBasemap').value  = state.settings.basemap;
+  $('#setKey').value      = state.settings.vworldKey;
+  $('#setHybrid').value   = state.settings.hybrid;
+  $('#setMaxPx').value    = state.settings.maxPx;
+
+  if(navigator.storage && navigator.storage.estimate){
+    navigator.storage.estimate().then(e=>{
+      const mb = n => (n/1048576).toFixed(0);
+      $('#quota').textContent = `사용 중 ${mb(e.usage||0)} MB / 사용 가능 약 ${mb(e.quota||0)} MB`;
+    }).catch(()=>{ $('#quota').textContent='확인할 수 없습니다'; });
+  } else $('#quota').textContent = '확인할 수 없습니다';
+}
+function bindSetting(sel, key, after){
+  $(sel).addEventListener('change', ()=>{
+    state.settings[key] = $(sel).value;
+    saveSettings();
+    if(after) after();
+  });
+}
+bindSetting('#setSurveyor','surveyor');
+bindSetting('#setBasemap','basemap', applyBasemap);
+bindSetting('#setKey','vworldKey', applyBasemap);
+bindSetting('#setHybrid','hybrid', applyBasemap);
+bindSetting('#setMaxPx','maxPx');
+$('#setSurveyor').addEventListener('input',()=>{ state.settings.surveyor = $('#setSurveyor').value; saveSettings(); });
+
+/* ─────────────────────────── 내비게이션 ─────────────────────────── */
+
+$('#btnSettings').addEventListener('click',()=>go(view==='settings' ? (state.streamId?'stream':'streams') : 'settings'));
+$('#btnBack').addEventListener('click',()=>{
+  if(view==='settings'){ go(state.streamId ? 'stream' : 'streams'); return; }
+  state.streamId = null; freeURLs(); go('streams');
+});
+
+/* 뒤로가기: 시트 → 화면 순으로 닫는다. 작성 중인 기록은 뒤로가기로 날리지 않는다. */
+function keepHistory(){ history.pushState(null,'',location.href); }
+window.addEventListener('popstate',()=>{
+  if(!$('#sheetRec').hidden){
+    toast('작성 중입니다 — 버리려면 취소를 누르세요', 2600);
+    keepHistory(); return;
+  }
+  const open = ['#sheetDetail','#sheetStream','#sheetConfirm'].find(s=>!$(s).hidden);
+  if(open){ $(open).hidden = true; keepHistory(); return; }
+  if(view==='settings'){ go(state.streamId ? 'stream' : 'streams'); keepHistory(); return; }
+  if(view==='stream'){ state.streamId = null; freeURLs(); go('streams'); keepHistory(); return; }
+  // 하천 목록에서 한 번 더 누르면 앱을 빠져나간다
+});
+keepHistory();
+
+/* 작성 중 이탈 경고 */
+window.addEventListener('beforeunload', e=>{
+  if(state.pending){ e.preventDefault(); e.returnValue=''; }
+});
+
+/* ─────────────────────────── 시작 ─────────────────────────── */
+
+(async function init(){
+  loadSettings();
+  try{
+    state.db = await openDB();
+  }catch(e){
+    document.body.innerHTML = '<div class="pad"><h2>저장소를 열 수 없습니다</h2>'
+      + '<p>시크릿 모드에서는 기록이 저장되지 않습니다. 일반 창에서 열어주세요.</p></div>';
+    return;
+  }
+  await renderStreams();
+  go('streams');
+  startGps();
+  startCompass();
+
+  if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+
+  if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
+})();
+</script>
+</body>
+</html>
