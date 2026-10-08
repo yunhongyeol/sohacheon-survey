@@ -293,8 +293,10 @@ textarea{min-height:72px;resize:vertical}
         </div>
         <div class="field" style="margin-top:12px">
           <label for="setKey">브이월드 API 키</label>
-          <input type="text" id="setKey" placeholder="QGIS에서 쓰는 키 그대로" autocomplete="off" spellcheck="false">
-          <p class="small muted" style="margin:0">브이월드 사이트에서 이 키에 <b>이 앱의 주소(도메인)</b>를 등록해야 브라우저에서 보입니다. QGIS는 등록 없이도 되지만 브라우저는 다릅니다.</p>
+          <input type="text" id="setKey" placeholder="브이월드에서 발급받은 키" autocomplete="off" spellcheck="false">
+          <p class="small muted" id="keyHelp" style="margin:0"></p>
+          <button class="btn" id="btnShareKey" hidden style="width:100%">설정 링크 복사</button>
+          <input type="text" id="shareLink" readonly hidden style="font-size:12px">
         </div>
         <div class="field" style="margin-top:12px">
           <label for="setHybrid">지명·경계 겹쳐보기</label>
@@ -509,7 +511,7 @@ const BASEMAPS = {
   }
 };
 
-const BUILD = '2026-10-08 · 6';   // 배포할 때마다 올린다 (sw.js의 APP 버전과 맞춘다)
+const BUILD = '2026-10-08 · 7';   // 배포할 때마다 올린다 (sw.js의 APP 버전과 맞춘다)
 
 const DEFAULT_SETTINGS = {surveyor:'', basemap:'esri', vworldKey:'', hybrid:'1', maxPx:'orig', v:2};
 
@@ -1386,6 +1388,8 @@ function renderSettings(){
     }).catch(()=>{ $('#quota').textContent='확인할 수 없습니다'; });
   } else $('#quota').textContent = '확인할 수 없습니다';
 
+  updateKeyUi();
+
   const ready = ('serviceWorker' in navigator && navigator.serviceWorker.controller);
   $('#buildInfo').textContent =
     `버전 ${BUILD} · ${ready ? '오프라인 준비됨' : '오프라인 준비 안 됨'}`;
@@ -1401,8 +1405,54 @@ bindSetting('#setSurveyor','surveyor');
 // 설정을 손대면 브이월드를 다시 시도해본다
 function retryBasemap(){ state.fallback = false; applyBasemap(); }
 bindSetting('#setBasemap','basemap', retryBasemap);
-bindSetting('#setKey','vworldKey', retryBasemap);
+bindSetting('#setKey','vworldKey', ()=>{ retryBasemap(); updateKeyUi(); });
 bindSetting('#setHybrid','hybrid', retryBasemap);
+
+/* ── 설정 링크 ──
+   키를 저장소에 넣지 않고 부서원에게 넘기는 방법. 받은 사람이 링크를
+   한 번 열면 키가 저장되고 주소에서는 지워진다. */
+
+function shareLink(){
+  const k = state.settings.vworldKey.trim();
+  return k ? location.origin + location.pathname + '#k=' + encodeURIComponent(k) : '';
+}
+
+function applyHashConfig(){
+  if(location.hash.length < 2) return;
+  let q;
+  try{ q = new URLSearchParams(location.hash.slice(1)); }catch(e){ return; }
+  const k = (q.get('k') || '').trim();
+  if(!k) return;
+  state.settings.vworldKey = k;
+  state.settings.basemap = 'vworld';
+  saveSettings();
+  try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){}
+  setTimeout(()=>toast('브이월드 설정을 받았습니다 — 바로 쓰시면 됩니다', 4000), 700);
+}
+
+function updateKeyUi(){
+  const has = !!state.settings.vworldKey.trim();
+  $('#keyHelp').textContent = has
+    ? '부서원에게는 아래 링크를 보내세요. 한 번 누르면 키가 자동으로 설정됩니다.'
+    : '브이월드에서 발급받은 키를 넣으세요. 그 키에 이 앱 도메인(yunhongyeol.github.io)이 등록돼 있어야 브라우저에서 보입니다.';
+  $('#btnShareKey').hidden = !has;
+  if(!has) $('#shareLink').hidden = true;
+}
+
+$('#btnShareKey').addEventListener('click', async ()=>{
+  const link = shareLink();
+  if(!link){ toast('먼저 API 키를 입력하세요'); return; }
+  try{
+    await navigator.clipboard.writeText(link);
+    toast('링크를 복사했습니다 — 메신저로 보내세요', 4000);
+  }catch(e){
+    // 클립보드가 막힌 경우: 직접 선택해 복사하도록 보여준다
+    const el = $('#shareLink');
+    el.hidden = false; el.value = link;
+    el.focus(); el.select();
+    toast('링크를 길게 눌러 복사하세요', 5000);
+  }
+});
 bindSetting('#setMaxPx','maxPx');
 $('#setSurveyor').addEventListener('input',()=>{ state.settings.surveyor = $('#setSurveyor').value; saveSettings(); });
 
@@ -1415,7 +1465,8 @@ $('#btnBack').addEventListener('click',()=>{
 });
 
 /* 뒤로가기: 시트 → 화면 순으로 닫는다. 작성 중인 기록은 뒤로가기로 날리지 않는다. */
-function keepHistory(){ history.pushState(null,'',location.href); }
+// 주소에 해시를 남기지 않는다 (설정 링크로 들어온 키가 다시 보이지 않게)
+function keepHistory(){ history.pushState(null,'',location.pathname + location.search); }
 window.addEventListener('popstate',()=>{
   if(!$('#sheetRec').hidden){
     toast('작성 중입니다 — 버리려면 취소를 누르세요', 2600);
@@ -1438,6 +1489,7 @@ window.addEventListener('beforeunload', e=>{
 
 (async function init(){
   loadSettings();
+  applyHashConfig();   // 설정 링크로 들어온 경우 키를 받아 저장한다
   try{
     state.db = await openDB();
   }catch(e){
