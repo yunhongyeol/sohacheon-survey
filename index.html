@@ -141,6 +141,8 @@ h2{font-size:14px;margin:0 0 8px;letter-spacing:.06em;text-transform:uppercase;c
 .tag.g-e{background:color-mix(in srgb,var(--fg-dim) 18%,transparent);color:var(--fg-dim)}
 .tag.dir{background:transparent;border:1px solid var(--line);color:var(--fg-dim);font-weight:600}
 .tag.issue{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.tag.draft{background:var(--warn);color:#fff}
+.shot.draft{border-color:var(--warn);border-width:2px}
 
 /* 지도 */
 #map{height:100%;width:100%;background:var(--surface-2)}
@@ -511,7 +513,7 @@ const BASEMAPS = {
   }
 };
 
-const BUILD = '2026-10-08 · 7';   // 배포할 때마다 올린다 (sw.js의 APP 버전과 맞춘다)
+const BUILD = '2026-10-08 · 8';   // 배포할 때마다 올린다 (sw.js의 APP 버전과 맞춘다)
 
 const DEFAULT_SETTINGS = {surveyor:'', basemap:'esri', vworldKey:'', hybrid:'1', maxPx:'orig', v:2};
 
@@ -774,8 +776,11 @@ function go(v){
 async function renderStreams(){
   state.streams = (await dbAll('streams')).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
   const all = await dbAll('photos');
-  const counts = {};
-  all.forEach(p=>{ counts[p.streamId] = (counts[p.streamId]||0)+1; });
+  const counts = {}, drafts = {};
+  all.forEach(p=>{
+    counts[p.streamId] = (counts[p.streamId]||0)+1;
+    if(p.draft) drafts[p.streamId] = (drafts[p.streamId]||0)+1;
+  });
 
   const box = $('#streamList');
   box.innerHTML = '';
@@ -794,7 +799,8 @@ async function renderStreams(){
       `<span class="no">${s.no ? escapeHtml(s.no) : '—'}</span>
        <span class="nm"><b>${escapeHtml(s.name)}</b>
          <span class="small muted">${s.len ? escapeHtml(s.len)+' km' : '연장 미입력'}</span></span>
-       <span class="cnt">사진 ${counts[s.id]||0}</span>`;
+       <span class="cnt">사진 ${counts[s.id]||0}
+         ${drafts[s.id]?`<br><span class="tag draft">작성중 ${drafts[s.id]}</span>`:''}</span>`;
     b.addEventListener('click',()=>openStream(s.id));
     b.addEventListener('contextmenu',e=>{ e.preventDefault(); openStreamSheet(s); });
     box.appendChild(b);
@@ -871,7 +877,8 @@ async function openStream(id){
   $('#title').textContent = s ? s.name : '하천';
   go('stream');
   showPane('list');
-  await loadPhotos();
+  const drafts = await loadPhotos();
+  if(drafts) toast(`작성 중이던 사진 ${drafts}장이 있습니다 — 탭하면 이어서 쓸 수 있습니다`, 5000);
 }
 
 async function loadPhotos(){
@@ -880,6 +887,7 @@ async function loadPhotos(){
   renderPhotos();
   if(state.map) renderMarkers();
   $('#btnExport').disabled = state.photos.length===0;
+  return state.photos.filter(p=>p.draft).length;
 }
 
 function renderPhotos(){
@@ -903,8 +911,10 @@ function renderPhotos(){
     const meta = document.createElement('div');
     meta.className = 'meta';
     const issues = p.issues || [];
+    if(p.draft) b.classList.add('draft');
     meta.innerHTML =
       `<div class="tags">
+         ${p.draft?'<span class="tag draft">작성중</span>':''}
          <span class="tag ${t.cls}">${escapeHtml(typeLabel(p))}${p.label?' · '+escapeHtml(p.label):''}</span>
          ${p.dir?`<span class="tag dir">${escapeHtml(p.dir)}</span>`:''}
          ${issues.filter(x=>x!==ISSUE_NONE).map(x=>
@@ -1082,9 +1092,10 @@ $('#fileCam').addEventListener('change', async e=>{
   try{ imgs = await processPhoto(file); }
   catch(err){ toast('사진을 읽지 못했습니다'); return; }
 
-  state.editing = null;
-  state.pending = {
+  const s = currentStream();
+  const rec = {
     id: uid(),
+    streamId: state.streamId,
     ts: Date.now(),
     type: '중류',
     no: 0,
@@ -1094,9 +1105,23 @@ $('#fileCam').addEventListener('change', async e=>{
     memo: '',
     pos: state.pos ? {...state.pos} : null,
     heading: state.heading,
+    surveyor: state.settings.surveyor,
     full: imgs.full,
-    thumb: imgs.thumb
+    thumb: imgs.thumb,
+    draft: true          // 작성 중. 저장 버튼을 누르면 풀린다
   };
+  rec.filename = buildName(s ? s.name : '하천', rec);
+
+  // 기록을 쓰기 전에 사진부터 넣어둔다. 메모를 쓰다 앱이 죽어도 사진은 남는다.
+  try{
+    await dbPut('photos', rec);
+  }catch(err){
+    toast('저장 실패 — 저장 공간을 확인하세요', 4000); return;
+  }
+  await loadPhotos();
+
+  state.editing = null;
+  state.pending = {...rec, issues:[]};
   openRec();
 });
 
@@ -1198,8 +1223,25 @@ $('#recLabel').addEventListener('input', ()=>{ if(state.pending) updateFname(); 
 $('#recMemo').addEventListener('input', ()=>{ if(state.pending) state.pending.memo = $('#recMemo').value; });
 
 function closeRec(){ $('#sheetRec').hidden = true; state.pending = null; state.editing = null; }
-$('#recClose').addEventListener('click', closeRec);
-$('#recCancel').addEventListener('click', closeRec);
+
+/* 취소: 방금 찍어 아직 한 번도 저장하지 않은 사진이면 버릴지 묻는다.
+   목록에서 이어 쓰던 경우(state.editing)는 그대로 두고 닫기만 한다. */
+async function cancelRec(){
+  const p = state.pending;
+  if(p && p.draft && !state.editing){
+    const ok = await confirmAsk('사진 버리기', '방금 찍은 사진을 지웁니다.', '버리기');
+    if(!ok) return;
+    await dbDel('photos', p.id);
+    closeRec();
+    await loadPhotos();
+    toast('버렸습니다');
+    return;
+  }
+  closeRec();
+  if(p && p.draft) toast('작성 중으로 남겨뒀습니다', 2600);
+}
+$('#recClose').addEventListener('click', cancelRec);
+$('#recCancel').addEventListener('click', cancelRec);
 
 $('#recSave').addEventListener('click', async ()=>{
   const s = currentStream();
@@ -1213,6 +1255,7 @@ $('#recSave').addEventListener('click', async ()=>{
     pos: p.pos, heading: p.heading,
     surveyor: state.settings.surveyor,
     full: p.full, thumb: p.thumb,
+    draft: false,
     filename: buildName(s?s.name:'하천', p)
   };
   try{
@@ -1232,6 +1275,13 @@ let detailId = null;
 function openDetail(id){
   const p = state.photos.find(x=>x.id===id);
   if(!p) return;
+  // 작성 중이던 사진은 상세 대신 작성 화면으로 이어진다
+  if(p.draft){
+    state.editing = p.id;
+    state.pending = {...p, no: p.no || 0, issues: [...(p.issues || [])]};
+    openRec();
+    return;
+  }
   detailId = id;
   $('#detTitle').textContent = typeLabel(p) + (p.dir ? ' · '+p.dir : '');
   const rows = [
@@ -1329,7 +1379,7 @@ function buildGeoJson(stream, photos){
 
 async function exportStreams(streams){
   const zip = new JSZip();
-  let total = 0;
+  let total = 0, drafts = 0;
   for(const s of streams){
     const photos = (await dbByStream(s.id)).sort((a,b)=>a.ts-b.ts);
     if(!photos.length) continue;
@@ -1341,6 +1391,7 @@ async function exportStreams(streams){
       used.add(name);
       folder.file(name, p.full);
       total++;
+      if(p.draft) drafts++;   // 빠뜨리는 것보다 낫다. 대신 끝나고 알린다
     });
     folder.file(sanitize(s.name)+'_기록.csv', buildCsv(s, photos));
     folder.file(sanitize(s.name)+'.geojson', buildGeoJson(s, photos));
@@ -1360,7 +1411,9 @@ async function exportStreams(streams){
   a.download = `${label}_${stamp(Date.now())}.zip`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
-  toast(`${total}장 내보냈습니다 — 다운로드 폴더 확인`, 3500);
+  toast(drafts
+    ? `${total}장 내보냈습니다 — 작성 중이던 ${drafts}장도 포함했으니 확인해 주세요`
+    : `${total}장 내보냈습니다 — 다운로드 폴더 확인`, drafts ? 5500 : 3500);
 }
 
 $('#btnExport').addEventListener('click',()=>{
@@ -1469,7 +1522,7 @@ $('#btnBack').addEventListener('click',()=>{
 function keepHistory(){ history.pushState(null,'',location.pathname + location.search); }
 window.addEventListener('popstate',()=>{
   if(!$('#sheetRec').hidden){
-    toast('작성 중입니다 — 버리려면 취소를 누르세요', 2600);
+    toast('사진은 이미 저장돼 있습니다 — 닫으려면 취소를 누르세요', 3000);
     keepHistory(); return;
   }
   const open = ['#sheetDetail','#sheetStream','#sheetConfirm'].find(s=>!$(s).hidden);
