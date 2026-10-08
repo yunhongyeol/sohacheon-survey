@@ -191,7 +191,7 @@ textarea{min-height:72px;resize:vertical}
   letter-spacing:.06em;margin-right:2px}
 
 .preview{width:100%;border-radius:10px;border:1px solid var(--line);max-width:100%;
-  aspect-ratio:4/3;object-fit:cover;background:var(--surface-2)}
+  max-height:52vh;object-fit:contain;background:var(--surface-2)}
 .gpsline{display:flex;align-items:center;gap:8px;font-size:13px;font-variant-numeric:tabular-nums;
   background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 .gpsline .dot{width:9px;height:9px;border-radius:50%;background:var(--bad);flex:0 0 auto}
@@ -284,11 +284,12 @@ textarea{min-height:72px;resize:vertical}
         <div class="field">
           <label for="setMaxPx">저장 해상도</label>
           <select id="setMaxPx">
-            <option value="1600">1600px (가벼움)</option>
-            <option value="1920">1920px (권장)</option>
-            <option value="2560">2560px (고화질·용량 큼)</option>
+            <option value="orig">원본 그대로 (권장)</option>
+            <option value="2560">2560px로 줄이기</option>
+            <option value="1920">1920px로 줄이기</option>
+            <option value="1600">1600px로 줄이기 (가장 가벼움)</option>
           </select>
-          <p class="small muted" style="margin:0">보고서 양식에 넣는 용도라면 1920px으로 충분합니다.</p>
+          <p class="small muted" style="margin:0">원본을 그대로 두면 화질이 가장 좋고, <b>카메라가 넣은 EXIF 정보(GPS·촬영기기·시각)도 보존</b>됩니다. 줄이기를 고르면 다시 저장하는 과정에서 EXIF가 사라집니다.</p>
         </div>
       </div>
       <div class="card pad">
@@ -428,7 +429,7 @@ const BASEMAPS = {
   }
 };
 
-const DEFAULT_SETTINGS = {surveyor:'', basemap:'esri', vworldKey:'', hybrid:'1', maxPx:'1920'};
+const DEFAULT_SETTINGS = {surveyor:'', basemap:'esri', vworldKey:'', hybrid:'1', maxPx:'orig', v:2};
 
 /* ─────────────────────────── 상태 ─────────────────────────── */
 
@@ -478,7 +479,12 @@ const dbByStream = id => req(tx('photos','readonly').index('streamId').getAll(id
 function loadSettings(){
   try{
     const raw = localStorage.getItem('sohacheon-settings');
-    if(raw) state.settings = {...DEFAULT_SETTINGS, ...JSON.parse(raw)};
+    if(raw){
+      const saved = JSON.parse(raw);
+      state.settings = {...DEFAULT_SETTINGS, ...saved};
+      // 초기 버전은 사진을 무조건 줄여 저장해 EXIF가 날아갔다. 원본 보존으로 올린다.
+      if(!saved.v){ state.settings.maxPx = 'orig'; state.settings.v = 2; saveSettings(); }
+    }
   }catch(e){ /* 사생활 보호 모드 등: 기본값 사용 */ }
 }
 function saveSettings(){
@@ -634,9 +640,13 @@ function drawTo(bmp,max,quality){
 }
 async function processPhoto(file){
   const bmp = await toBitmap(file);
-  const max = parseInt(state.settings.maxPx,10) || 1920;
-  const full = await drawTo(bmp, max, 0.85);
-  const thumb = await drawTo(bmp, 420, 0.7);
+  const thumb = await drawTo(bmp, 420, 0.7);   // 목록·지도용 축소본
+  const opt = state.settings.maxPx;
+  // 원본을 그대로 두면 화질도 EXIF(카메라가 기록한 GPS·시각)도 손대지 않는다.
+  // 캔버스로 다시 그리는 순간 EXIF는 사라지므로 줄이기를 고른 경우에만 재인코딩한다.
+  const full = (opt === 'orig')
+    ? file
+    : await drawTo(bmp, parseInt(opt,10) || 2560, 0.92);
   if(bmp.close) bmp.close();
   return {full, thumb};
 }
@@ -972,7 +982,7 @@ $('#fileCam').addEventListener('change', async e=>{
 function openRec(){
   const p = state.pending;
   $('#recTitle').textContent = state.editing ? '기록 수정' : '사진 기록';
-  $('#recPreview').src = objURL(p.thumb);
+  $('#recPreview').src = objURL(p.full);   // 썸네일이 아니라 실제 저장될 사진을 보여준다
   $('#recLabel').value = p.label || '';
   $('#recMemo').value = p.memo || '';
   buildChips('#recType', TYPES.map(t=>t.v), p.type, v=>{ p.type=v; afterChip(); }, true);
@@ -1055,7 +1065,6 @@ function openDetail(id){
   if(!p) return;
   detailId = id;
   $('#detTitle').textContent = p.type + (p.dir ? ' · '+p.dir : '');
-  $('#detImg').src = objURL(p.full);
   const rows = [
     ['파일명', p.filename],
     ['유형', p.type + (p.label ? ' / '+p.label : '')],
@@ -1066,13 +1075,23 @@ function openDetail(id){
     ['방위', p.heading!=null ? `${p.heading}° (참고)` : '—'],
     ['촬영', isoText(p.ts)],
     ['조사자', p.surveyor || '—'],
+    ['사진', `${(p.full.size/1048576).toFixed(1)} MB`, 'detRes'],
     ['메모', p.memo || '—']
   ];
-  $('#detMeta').innerHTML = rows.map(([k,v])=>
+  $('#detMeta').innerHTML = rows.map(([k,v,id])=>
     `<div style="display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)">
        <span class="small muted" style="flex:0 0 68px">${k}</span>
-       <span class="small" style="flex:1;min-width:0;word-break:break-all">${escapeHtml(v)}</span>
+       <span class="small"${id?` id="${id}"`:''} style="flex:1;min-width:0;word-break:break-all">${escapeHtml(v)}</span>
      </div>`).join('');
+
+  // 실제 저장된 해상도는 이미지가 로드돼야 알 수 있다
+  const img = $('#detImg');
+  img.onload = ()=>{
+    const el = $('#detRes');
+    if(el) el.textContent =
+      `${img.naturalWidth} × ${img.naturalHeight} · ${(p.full.size/1048576).toFixed(1)} MB`;
+  };
+  img.src = objURL(p.full);
   $('#sheetDetail').hidden = false;
 }
 $('#detClose').addEventListener('click',()=>{ $('#sheetDetail').hidden = true; });
