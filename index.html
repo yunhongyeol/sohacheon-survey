@@ -456,10 +456,10 @@ const TYPES = [
   {g:'구조물',   v:'보',          cls:'g-t', num:true, abbr:'보'},
   {g:'구조물',   v:'낙차공',      cls:'g-t', num:true, abbr:'낙차공'},
   {g:'구조물',   v:'수문',        cls:'g-t', num:true, abbr:'수문'},
-  {g:'구조물',   v:'배수통문',    cls:'g-t', num:true, abbr:'통문'},
+  {g:'구조물',   v:'배수통관',    cls:'g-t', num:true, abbr:'통관'},
+  {g:'구조물',   v:'배수암거',    cls:'g-t', num:true, abbr:'배수암거'},
   {g:'구조물',   v:'취수시설',    cls:'g-t', num:true, abbr:'취수'},
   {g:'구조물',   v:'어도',        cls:'g-t', num:true, abbr:'어도'},
-  {g:'구조물',   v:'하상유지시설',cls:'g-t', num:true, abbr:'하상유지'},
   {g:'구조물',   v:'기타구조물',  cls:'g-t', num:true, abbr:'구조물'},
 
   {g:'하천현황', v:'호안',        cls:'g-c'},
@@ -590,7 +590,8 @@ function isoText(ts){
 function sanitize(s){
   return String(s||'').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'').replace(/\s+/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'');
 }
-function typeOf(v){ return TYPES.find(t=>t.v===v) || TYPES[0]; }
+// 목록에서 빠진 옛 유형으로 찍어둔 기록도 그대로 열리게 둔다
+function typeOf(v){ return TYPES.find(t=>t.v===v) || {g:'기타', v, cls:'g-e'}; }
 function issueOf(v){ return ISSUES.find(i=>i.v===v) || {g:'',v}; }
 
 /* 번호가 붙은 유형의 표시 이름: 교량 1번 → "1교", 낙차공 2번 → "2낙차공" */
