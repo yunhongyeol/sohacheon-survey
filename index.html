@@ -513,7 +513,7 @@ const BASEMAPS = {
   }
 };
 
-const BUILD = '2026-10-08 · 8';   // 배포할 때마다 올린다 (sw.js의 APP 버전과 맞춘다)
+const BUILD = '2026-10-08 · 9';   // 배포할 때마다 올린다 (sw.js의 APP 버전과 맞춘다)
 
 const DEFAULT_SETTINGS = {surveyor:'', basemap:'esri', vworldKey:'', hybrid:'1', maxPx:'orig', v:2};
 
@@ -1558,7 +1558,17 @@ window.addEventListener('beforeunload', e=>{
   if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
 
   if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')){
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
+    // updateViaCache:'none' — sw.js 자체가 브라우저 캐시에서 나오지 않게 한다
+    navigator.serviceWorker.register('sw.js', {updateViaCache:'none'}).then(reg=>{
+      reg.addEventListener('updatefound', ()=>{
+        const sw = reg.installing;
+        if(!sw) return;
+        sw.addEventListener('statechange', ()=>{
+          if(sw.state === 'installed' && navigator.serviceWorker.controller)
+            toast('새 버전이 있습니다 — 앱을 닫았다 열면 적용됩니다', 6000);
+        });
+      });
+    }).catch(()=>{});
   }
 })();
 </script>

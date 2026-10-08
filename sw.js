@@ -1,7 +1,7 @@
 /* 소하천 조사 — 오프라인 캐시
    앱 껍데기는 설치 시 미리 받고, 위성 타일은 본 것부터 쌓인다. */
 
-const APP = 'sohacheon-app-v8';
+const APP = 'sohacheon-app-v9';
 const TILES = 'sohacheon-tiles-v1';
 
 const SHELL = [
@@ -57,7 +57,28 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // 앱 껍데기와 라이브러리: 캐시 우선, 뒤에서 갱신
+  // 페이지 자체는 통신이 되면 항상 최신을 받는다. 캐시를 먼저 내주면
+  // 업데이트가 한 박자 늦게 반영돼 "고쳤는데 그대로"가 된다.
+  if (req.mode === 'navigate' || req.destination === 'document') {
+    e.respondWith((async () => {
+      const c = await caches.open(APP);
+      try {
+        const res = await fetch(req);
+        if (res && res.ok) c.put('./index.html', res.clone()).catch(() => {});
+        return res;
+      } catch (_) {
+        return (await c.match('./index.html'))
+            || (await c.match('./'))
+            || new Response('오프라인입니다.', {
+                 status: 503,
+                 headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+               });
+      }
+    })());
+    return;
+  }
+
+  // 라이브러리와 아이콘 등: 캐시 우선, 뒤에서 갱신
   e.respondWith((async () => {
     const c = await caches.open(APP);
     const hit = await c.match(req, { ignoreSearch: false });
