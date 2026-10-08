@@ -137,8 +137,10 @@ h2{font-size:14px;margin:0 0 8px;letter-spacing:.06em;text-transform:uppercase;c
   background:var(--accent-soft);color:var(--accent);white-space:nowrap}
 .tag.g-s{background:var(--accent-soft);color:var(--accent)}
 .tag.g-t{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.tag.g-c{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
 .tag.g-e{background:color-mix(in srgb,var(--fg-dim) 18%,transparent);color:var(--fg-dim)}
 .tag.dir{background:transparent;border:1px solid var(--line);color:var(--fg-dim);font-weight:600}
+.tag.issue{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
 
 /* 지도 */
 #map{height:100%;width:100%;background:var(--surface-2)}
@@ -183,12 +185,34 @@ input[type=text],input[type=number],textarea,select{
   padding:12px;min-height:48px}
 textarea{min-height:72px;resize:vertical}
 
-.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
 .chips button{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;
-  padding:10px 14px;font-size:14px;font-weight:600;min-height:44px}
+  padding:9px 13px;font-size:14px;font-weight:600;min-height:42px}
 .chips button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:transparent}
-.chipgroup{font-size:11px;font-weight:700;color:var(--fg-dim);align-self:center;
-  letter-spacing:.06em;margin-right:2px}
+.chips.warn button[aria-pressed="true"]{background:var(--warn);color:#fff}
+.chipgroup{flex:0 0 100%;font-size:11px;font-weight:700;color:var(--fg-dim);
+  letter-spacing:.06em;margin:6px 0 1px}
+.chipgroup:first-child{margin-top:0}
+
+/* 번호 조절기 */
+.stepper{display:flex;align-items:center;gap:0;align-self:flex-start;
+  border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface-2)}
+.stepper button{background:transparent;border:0;width:52px;height:48px;font-size:20px;
+  font-weight:700;color:var(--accent)}
+.stepper button:active{background:var(--accent-soft)}
+.stepper span{min-width:92px;text-align:center;font-weight:700;font-size:16px;
+  padding:0 8px;border-left:1px solid var(--line);border-right:1px solid var(--line);
+  line-height:48px;font-variant-numeric:tabular-nums}
+
+/* 접이식 섹션 */
+.disclosure{display:flex;align-items:center;justify-content:space-between;width:100%;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:10px;
+  padding:12px 14px;font-size:14px;font-weight:700;min-height:48px;text-align:left}
+.disclosure .caret{transition:transform .15s;color:var(--fg-dim)}
+.disclosure[aria-expanded="true"] .caret{transform:rotate(180deg)}
+.disclosure[aria-expanded="true"]{border-bottom-left-radius:0;border-bottom-right-radius:0}
+#recIssueBox{border:1px solid var(--line);border-top:0;border-radius:0 0 10px 10px;
+  padding:12px;background:var(--surface)}
 
 .preview{width:100%;border-radius:10px;border:1px solid var(--line);max-width:100%;
   max-height:52vh;object-fit:contain;background:var(--surface-2)}
@@ -320,6 +344,15 @@ textarea{min-height:72px;resize:vertical}
         <label>유형</label>
         <div class="chips" id="recType"></div>
       </div>
+      <div class="field" id="recNoField" hidden>
+        <label>번호</label>
+        <div class="stepper">
+          <button type="button" id="recNoMinus" aria-label="번호 줄이기">−</button>
+          <span id="recNoVal">1교</span>
+          <button type="button" id="recNoPlus" aria-label="번호 늘리기">＋</button>
+        </div>
+        <p class="small muted" style="margin:0">같은 구조물을 여러 방향 찍을 땐 그대로 두고, 다음 구조물로 넘어가면 ＋ 를 누르세요.</p>
+      </div>
       <div class="field" id="recLabelField" hidden>
         <label for="recLabel">구조물 명칭 (선택)</label>
         <input type="text" id="recLabel" placeholder="예: 당동교">
@@ -327,6 +360,13 @@ textarea{min-height:72px;resize:vertical}
       <div class="field">
         <label>촬영 방향</label>
         <div class="chips" id="recDir"></div>
+      </div>
+      <div class="field">
+        <button type="button" class="disclosure" id="recIssueToggle" aria-expanded="false">
+          <span>문제점 <span class="small muted" id="recIssueHint">선택 안 함</span></span>
+          <span class="caret">▾</span>
+        </button>
+        <div id="recIssueBox" hidden><div class="chips" id="recIssues"></div></div>
       </div>
       <div class="field">
         <label for="recMemo">메모</label>
@@ -400,20 +440,59 @@ textarea{min-height:72px;resize:vertical}
 
 /* ─────────────────────────── 상수 ─────────────────────────── */
 
+/* 유형: 하나만 고른다. 파일명에 들어가므로 짧고 분명한 말로 둔다. */
 const TYPES = [
-  {g:'구간',   v:'시점',      cls:'g-s'},
-  {g:'구간',   v:'중류',      cls:'g-s'},
-  {g:'구간',   v:'종점',      cls:'g-s'},
-  {g:'구조물', v:'교량',      cls:'g-t', label:true},
-  {g:'구조물', v:'낙차공',    cls:'g-t', label:true},
-  {g:'구조물', v:'보',        cls:'g-t', label:true},
-  {g:'구조물', v:'수문',      cls:'g-t', label:true},
-  {g:'구조물', v:'기타구조물', cls:'g-t', label:true},
-  {g:'기타',   v:'기타',      cls:'g-e'}
-];
-const DIRS = ['하류방향','상류방향','좌안','우안','전경'];
+  {g:'구간',     v:'시점',        cls:'g-s'},
+  {g:'구간',     v:'시점(변경)',  cls:'g-s'},
+  {g:'구간',     v:'중류',        cls:'g-s'},
+  {g:'구간',     v:'종점',        cls:'g-s'},
+  {g:'구간',     v:'종점(변경)',  cls:'g-s'},
+  {g:'구간',     v:'합류부',      cls:'g-s'},
 
-const PIN_COLOR = {'g-s':'#0b7a94','g-t':'#b07a16','g-e':'#6b7f88'};
+  // 구조물은 번호를 붙인다. abbr은 번호와 붙여 쓰는 짧은 말 (교량 1번 → 1교)
+  {g:'구조물',   v:'교량',        cls:'g-t', num:true, abbr:'교'},
+  {g:'구조물',   v:'세월교',      cls:'g-t', num:true, abbr:'세월교'},
+  {g:'구조물',   v:'암거',        cls:'g-t', num:true, abbr:'암거'},
+  {g:'구조물',   v:'보',          cls:'g-t', num:true, abbr:'보'},
+  {g:'구조물',   v:'낙차공',      cls:'g-t', num:true, abbr:'낙차공'},
+  {g:'구조물',   v:'수문',        cls:'g-t', num:true, abbr:'수문'},
+  {g:'구조물',   v:'배수통문',    cls:'g-t', num:true, abbr:'통문'},
+  {g:'구조물',   v:'취수시설',    cls:'g-t', num:true, abbr:'취수'},
+  {g:'구조물',   v:'어도',        cls:'g-t', num:true, abbr:'어도'},
+  {g:'구조물',   v:'하상유지시설',cls:'g-t', num:true, abbr:'하상유지'},
+  {g:'구조물',   v:'기타구조물',  cls:'g-t', num:true, abbr:'구조물'},
+
+  {g:'하천현황', v:'호안',        cls:'g-c'},
+  {g:'하천현황', v:'제방',        cls:'g-c'},
+  {g:'하천현황', v:'하상',        cls:'g-c'},
+  {g:'하천현황', v:'저수로',      cls:'g-c'},
+  {g:'하천현황', v:'둔치',        cls:'g-c'},
+
+  {g:'기타',     v:'기타',        cls:'g-e'}
+];
+
+/* 문제점: 여러 개 고를 수 있고, 안 골라도 된다. 파일명에는 들어가지 않는다. */
+const ISSUES = [
+  {g:'구조', v:'세굴'},        {g:'구조', v:'유실'},
+  {g:'구조', v:'균열·파손'},   {g:'구조', v:'침하'},
+  {g:'구조', v:'누수'},        {g:'구조', v:'전도'},
+
+  {g:'하상', v:'퇴적'},        {g:'하상', v:'하상저하'},
+  {g:'하상', v:'역행침식'},
+
+  {g:'지장', v:'잡목'},        {g:'지장', v:'지장수목'},
+  {g:'지장', v:'쓰레기'},      {g:'지장', v:'불법경작'},
+  {g:'지장', v:'불법점용'},
+
+  {g:'통수', v:'통수단면부족'},{g:'통수', v:'하천선형불량'},
+
+  {g:'확인', v:'이상없음'}     // 이것만 고르면 나머지는 해제된다
+];
+const ISSUE_NONE = '이상없음';
+
+const DIRS = ['하류방향','상류방향','좌안','우안','전경','근경'];
+
+const PIN_COLOR = {'g-s':'#0b7a94','g-t':'#b07a16','g-c':'#2f7d4a','g-e':'#6b7f88'};
 
 const BASEMAPS = {
   esri:{
@@ -512,13 +591,30 @@ function sanitize(s){
   return String(s||'').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'').replace(/\s+/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'');
 }
 function typeOf(v){ return TYPES.find(t=>t.v===v) || TYPES[0]; }
+function issueOf(v){ return ISSUES.find(i=>i.v===v) || {g:'',v}; }
+
+/* 번호가 붙은 유형의 표시 이름: 교량 1번 → "1교", 낙차공 2번 → "2낙차공" */
+function typeLabel(rec){
+  const t = typeOf(rec.type);
+  return (t.num && rec.no) ? `${rec.no}${t.abbr || t.v}` : rec.type;
+}
 
 function buildName(streamName, rec){
-  const parts = [streamName, rec.type];
+  const parts = [streamName, typeLabel(rec)];
   if(rec.label) parts.push(rec.label);
   if(rec.dir) parts.push(rec.dir);
   parts.push(stamp(rec.ts));
   return sanitize(parts.join('_')) + '.jpg';
+}
+
+/* 같은 하천에서 그 유형으로 마지막에 쓴 번호. 같은 구조물을 여러 방향
+   찍을 때 번호가 유지되고, 다음 구조물에서는 ＋ 한 번이면 된다. */
+function lastNumberFor(type){
+  for(let i = state.photos.length - 1; i >= 0; i--){
+    const p = state.photos[i];
+    if(p.type === type && p.no) return p.no;
+  }
+  return 1;
 }
 
 function objURL(blob){ const u = URL.createObjectURL(blob); state.urls.add(u); return u; }
@@ -799,10 +895,13 @@ function renderPhotos(){
     img.src = objURL(p.thumb); img.alt = p.filename; img.loading = 'lazy';
     const meta = document.createElement('div');
     meta.className = 'meta';
+    const issues = p.issues || [];
     meta.innerHTML =
       `<div class="tags">
-         <span class="tag ${t.cls}">${escapeHtml(p.type)}${p.label?' · '+escapeHtml(p.label):''}</span>
+         <span class="tag ${t.cls}">${escapeHtml(typeLabel(p))}${p.label?' · '+escapeHtml(p.label):''}</span>
          ${p.dir?`<span class="tag dir">${escapeHtml(p.dir)}</span>`:''}
+         ${issues.filter(x=>x!==ISSUE_NONE).map(x=>
+            `<span class="tag issue">${escapeHtml(x)}</span>`).join('')}
        </div>
        ${p.memo?`<div class="memo">${escapeHtml(p.memo)}</div>`:''}
        <time>${timeText(p.ts)}${p.pos?'':' · 위치없음'}</time>`;
@@ -879,7 +978,10 @@ function renderMarkers(){
     img.src = objURL(p.thumb); img.style.width='100%'; img.style.borderRadius='6px'; img.alt='';
     const cap = document.createElement('div');
     cap.style.cssText = 'font-size:12px;margin-top:6px;word-break:break-all';
-    cap.innerHTML = `<b>${escapeHtml(p.type)}${p.dir?' · '+escapeHtml(p.dir):''}</b><br>${escapeHtml(p.filename)}`;
+    const iss = (p.issues||[]).filter(x=>x!==ISSUE_NONE);
+    cap.innerHTML = `<b>${escapeHtml(typeLabel(p))}${p.dir?' · '+escapeHtml(p.dir):''}</b><br>`
+      + escapeHtml(p.filename)
+      + (iss.length ? `<br><span style="color:#c03a2b">${escapeHtml(iss.join(', '))}</span>` : '');
     html.append(img,cap);
     m.bindPopup(html);
     m.on('popupopen',()=>{ /* 썸네일 URL은 loadPhotos에서 일괄 해제 */ });
@@ -968,8 +1070,10 @@ $('#fileCam').addEventListener('change', async e=>{
     id: uid(),
     ts: Date.now(),
     type: '중류',
+    no: 0,
     label: '',
     dir: '하류방향',
+    issues: [],
     memo: '',
     pos: state.pos ? {...state.pos} : null,
     heading: state.heading,
@@ -985,29 +1089,61 @@ function openRec(){
   $('#recPreview').src = objURL(p.full);   // 썸네일이 아니라 실제 저장될 사진을 보여준다
   $('#recLabel').value = p.label || '';
   $('#recMemo').value = p.memo || '';
-  buildChips('#recType', TYPES.map(t=>t.v), p.type, v=>{ p.type=v; afterChip(); }, true);
-  buildChips('#recDir', DIRS, p.dir, v=>{ p.dir = (p.dir===v ? '' : v); afterChip(); });
+  $('#recIssueBox').hidden = !(p.issues && p.issues.length);
+  $('#recIssueToggle').setAttribute('aria-expanded', String(!$('#recIssueBox').hidden));
   afterChip();
   $('#sheetRec').hidden = false;
   renderGps();
 }
+
 function afterChip(){
   const p = state.pending;
   const t = typeOf(p.type);
-  $('#recLabelField').hidden = !t.label;
-  if(!t.label){ p.label = ''; $('#recLabel').value = ''; }
-  buildChips('#recType', TYPES.map(x=>x.v), p.type, v=>{ p.type=v; afterChip(); }, true);
-  buildChips('#recDir', DIRS, p.dir, v=>{ p.dir = (p.dir===v ? '' : v); afterChip(); });
+
+  // 구조물만 번호와 명칭을 받는다
+  $('#recNoField').hidden = !t.num;
+  $('#recLabelField').hidden = !t.num;
+  if(!t.num){ p.label = ''; $('#recLabel').value = ''; p.no = 0; }
+  else if(!p.no) p.no = lastNumberFor(p.type);
+  $('#recNoVal').textContent = p.no ? `${p.no}${t.abbr || t.v}` : '번호 없음';
+
+  buildChips('#recType', TYPES.map(x=>x.v),
+    v => v === p.type,
+    v => { if(v !== p.type){ p.type = v; p.no = 0; } afterChip(); },
+    v => typeOf(v).g);
+
+  buildChips('#recDir', DIRS,
+    v => v === p.dir,
+    v => { p.dir = (p.dir === v ? '' : v); afterChip(); });
+
+  buildChips('#recIssues', ISSUES.map(i=>i.v),
+    v => p.issues.includes(v),
+    v => { toggleIssue(v); afterChip(); },
+    v => issueOf(v).g);
+
+  const n = p.issues.length;
+  $('#recIssueHint').textContent = n ? p.issues.join(', ') : '선택 안 함';
+  $('#recIssueHint').className = n ? 'small' : 'small muted';
   updateFname();
 }
-function buildChips(sel, values, active, onPick, grouped){
+
+/* 이상없음은 다른 항목과 같이 설 수 없다 */
+function toggleIssue(v){
+  const p = state.pending;
+  const on = p.issues.includes(v);
+  if(on){ p.issues = p.issues.filter(x=>x!==v); return; }
+  p.issues = (v === ISSUE_NONE) ? [ISSUE_NONE]
+                                : [...p.issues.filter(x=>x!==ISSUE_NONE), v];
+}
+
+function buildChips(sel, values, isOn, onPick, groupOf){
   const box = $(sel);
   box.innerHTML = '';
   let lastG = null;
   values.forEach(v=>{
-    if(grouped){
-      const g = typeOf(v).g;
-      if(g!==lastG){
+    if(groupOf){
+      const g = groupOf(v);
+      if(g !== lastG){
         const lab = document.createElement('span');
         lab.className = 'chipgroup'; lab.textContent = g;
         box.appendChild(lab); lastG = g;
@@ -1015,11 +1151,26 @@ function buildChips(sel, values, active, onPick, grouped){
     }
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = v;
-    b.setAttribute('aria-pressed', String(v===active));
+    b.setAttribute('aria-pressed', String(!!isOn(v)));
     b.addEventListener('click',()=>onPick(v));
     box.appendChild(b);
   });
 }
+
+function stepNumber(d){
+  const p = state.pending;
+  if(!p) return;
+  p.no = Math.max(0, Math.min(99, (p.no || 0) + d));
+  afterChip();
+}
+$('#recNoMinus').addEventListener('click',()=>stepNumber(-1));
+$('#recNoPlus').addEventListener('click',()=>stepNumber(1));
+$('#recIssueToggle').addEventListener('click',()=>{
+  const box = $('#recIssueBox');
+  box.hidden = !box.hidden;
+  $('#recIssueToggle').setAttribute('aria-expanded', String(!box.hidden));
+});
+
 function updateFname(){
   const s = currentStream();
   const p = state.pending;
@@ -1040,7 +1191,8 @@ $('#recSave').addEventListener('click', async ()=>{
   p.memo = $('#recMemo').value.trim();
   const rec = {
     id: p.id, streamId: state.streamId, ts: p.ts,
-    type: p.type, label: p.label, dir: p.dir, memo: p.memo,
+    type: p.type, no: p.no || 0, label: p.label, dir: p.dir,
+    issues: p.issues || [], memo: p.memo,
     pos: p.pos, heading: p.heading,
     surveyor: state.settings.surveyor,
     full: p.full, thumb: p.thumb,
@@ -1064,11 +1216,12 @@ function openDetail(id){
   const p = state.photos.find(x=>x.id===id);
   if(!p) return;
   detailId = id;
-  $('#detTitle').textContent = p.type + (p.dir ? ' · '+p.dir : '');
+  $('#detTitle').textContent = typeLabel(p) + (p.dir ? ' · '+p.dir : '');
   const rows = [
     ['파일명', p.filename],
-    ['유형', p.type + (p.label ? ' / '+p.label : '')],
+    ['유형', typeLabel(p) + (p.label ? ' / '+p.label : '')],
     ['방향', p.dir || '—'],
+    ['문제점', (p.issues && p.issues.length) ? p.issues.join(', ') : '—'],
     ['좌표', p.pos ? `${p.pos.lat.toFixed(6)}, ${p.pos.lon.toFixed(6)}` : '기록 없음'],
     ['오차', p.pos ? `±${Math.round(p.pos.acc)} m` : '—'],
     ['고도', p.pos && p.pos.alt!=null ? `${Math.round(p.pos.alt)} m` : '—'],
@@ -1100,7 +1253,8 @@ $('#detEdit').addEventListener('click',()=>{
   if(!p) return;
   $('#sheetDetail').hidden = true;
   state.editing = p.id;
-  state.pending = {...p};
+  // 번호·문제점이 없던 시절의 기록도 열리도록 기본값을 채운다
+  state.pending = {...p, no: p.no || 0, issues: [...(p.issues || [])]};
   openRec();
 });
 $('#detDelete').addEventListener('click', async ()=>{
@@ -1116,8 +1270,8 @@ $('#detDelete').addEventListener('click', async ()=>{
 
 /* ─────────────────────────── 내보내기 ─────────────────────────── */
 
-const CSV_HEAD = ['파일명','소하천번호','소하천명','유형','명칭','촬영방향','위도','경도',
-                  'GPS오차(m)','고도(m)','방위각(deg)','촬영시각','조사자','메모'];
+const CSV_HEAD = ['파일명','소하천번호','소하천명','유형','번호','표기','명칭','촬영방향','문제점',
+                  '위도','경도','GPS오차(m)','고도(m)','방위각(deg)','촬영시각','조사자','메모'];
 
 function csvCell(v){
   const s = v==null ? '' : String(v);
@@ -1127,7 +1281,8 @@ function buildCsv(stream, photos){
   const rows = [CSV_HEAD.join(',')];
   photos.forEach(p=>{
     rows.push([
-      p.filename, stream.no||'', stream.name, p.type, p.label||'', p.dir||'',
+      p.filename, stream.no||'', stream.name, p.type, p.no||'', typeLabel(p),
+      p.label||'', p.dir||'', (p.issues||[]).join(';'),
       p.pos?p.pos.lat.toFixed(7):'', p.pos?p.pos.lon.toFixed(7):'',
       p.pos?Math.round(p.pos.acc):'', (p.pos&&p.pos.alt!=null)?Math.round(p.pos.alt):'',
       p.heading!=null?p.heading:'', isoText(p.ts), p.surveyor||'', p.memo||''
@@ -1145,7 +1300,8 @@ function buildGeoJson(stream, photos){
       geometry:{type:'Point',coordinates:[+p.pos.lon.toFixed(7), +p.pos.lat.toFixed(7)]},
       properties:{
         파일명:p.filename, 소하천번호:stream.no||'', 소하천명:stream.name,
-        유형:p.type, 명칭:p.label||'', 촬영방향:p.dir||'',
+        유형:p.type, 번호:p.no||null, 표기:typeLabel(p),
+        명칭:p.label||'', 촬영방향:p.dir||'', 문제점:(p.issues||[]).join(';'),
         'GPS오차_m':p.pos?Math.round(p.pos.acc):null,
         '고도_m':p.pos&&p.pos.alt!=null?Math.round(p.pos.alt):null,
         방위각:p.heading, 촬영시각:isoText(p.ts), 조사자:p.surveyor||'', 메모:p.memo||''

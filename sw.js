@@ -1,7 +1,7 @@
 /* 소하천 조사 — 오프라인 캐시
    앱 껍데기는 설치 시 미리 받고, 위성 타일은 본 것부터 쌓인다. */
 
-const APP = 'sohacheon-app-v2';
+const APP = 'sohacheon-app-v3';
 const TILES = 'sohacheon-tiles-v1';
 
 const SHELL = [
